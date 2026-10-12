@@ -1,3 +1,17 @@
+# ruff: noqa: E402
+
+import sys
+
+from startup import SERVER_VERSION
+
+
+# Keep the version probe independent from optional server runtime extras.
+if __name__ == "__main__" and "--version" in sys.argv:
+    print(f"Ansam MCP Discovery Server v{SERVER_VERSION}")
+    raise SystemExit(0)
+
+
+import argparse
 import asyncio
 from collections import OrderedDict
 from typing import Any, Dict, Optional
@@ -10,13 +24,13 @@ from fastmcp.server.lifespan import lifespan
 from pathlib import Path
 import logging
 from fastmcp.client.transports.stdio import StdioTransport
-import argparse
 import inspect
 from auth_manager import AuthManager
 from hybrid_searcher import HybridToolSearcher
 from rate_limiter import RateLimiterManager
 from circuit_breaker import CircuitBreakerManager, CircuitOpenError
 from config import Config
+from startup import log_startup
 
 
 logger = logging.getLogger(__name__)
@@ -534,10 +548,16 @@ async def call_tool(
 
 
 if __name__ == "__main__":
+    logging.basicConfig(level=logging.INFO)
     parser = argparse.ArgumentParser(description="Run the MCP server")
     group = parser.add_mutually_exclusive_group()
     group.add_argument("--sse", action="store_true", help="Run with SSE transport")
     group.add_argument("--http", action="store_true", help="Run with HTTP transport")
+    parser.add_argument(
+        "--version",
+        action="version",
+        version=f"Ansam MCP Discovery Server v{SERVER_VERSION}",
+    )
     parser.add_argument("--host", default="0.0.0.0", help="Host to bind to")
     parser.add_argument("--port", type=int, default=8000, help="Port to bind to")
     parser.add_argument("--transport", choices=["stdio", "sse", "http"],
@@ -546,11 +566,20 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     if args.transport == "sse" or args.sse:
+        log_startup(
+            logger, "sse", args.host, args.port,
+            Config.QDRANT_URL, Config.MAX_OPEN_CONNECTIONS,
+        )
         mcp.run(transport="sse", host=args.host, port=args.port)
-        logger.info("Starting MCP server with SSE transport")
     elif args.transport == "http" or args.http:
+        log_startup(
+            logger, "http", args.host, args.port,
+            Config.QDRANT_URL, Config.MAX_OPEN_CONNECTIONS,
+        )
         mcp.run(transport="http", host=args.host, port=args.port)
-        logger.info("Starting MCP server with HTTP transport")
     else:
-        logger.info("Starting MCP server with stdio transport")
+        log_startup(
+            logger, "stdio", args.host, args.port,
+            Config.QDRANT_URL, Config.MAX_OPEN_CONNECTIONS,
+        )
         mcp.run(transport="stdio")
