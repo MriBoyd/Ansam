@@ -150,6 +150,7 @@ Contributions are warmly welcomed! We are actively cultivating a beginner-friend
 
 - Looking for a good place to start? Check our curated [Good First Issues](https://github.com/MriBoyd/Ansam/labels/good%20first%20issue).
 - Please read our [CONTRIBUTING.md](CONTRIBUTING.md) for local development setup, testing, and pull request guidelines.
+- To see recent releases and changes, check the [CHANGELOG.md](CHANGELOG.md).
 
 ---
 
