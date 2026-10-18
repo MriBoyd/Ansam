@@ -41,8 +41,15 @@ class TokenBucketRateLimiter:
 
     async def acquire(self, tokens: int = 1):
         """Acquire tokens, waiting if necessary."""
-        async with self._lock:
-            while True:
+        if tokens <= 0:
+            raise ValueError(f"Requested tokens must be positive, got {tokens}")
+        if tokens > self.capacity:
+            raise ValueError(
+                f"Requested {tokens} tokens exceeds maximum capacity {self.capacity}"
+            )
+
+        while True:
+            async with self._lock:
                 await self._refill()
 
                 if self._tokens >= tokens:
@@ -51,7 +58,8 @@ class TokenBucketRateLimiter:
 
                 # Wait for next token
                 wait_time = (tokens - self._tokens) / self.rate
-                await asyncio.sleep(wait_time)
+
+            await asyncio.sleep(wait_time)
 
 
 class RateLimiterManager:
