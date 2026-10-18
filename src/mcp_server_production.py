@@ -2,7 +2,12 @@
 
 import sys
 
-from startup import SERVER_VERSION
+try:
+    from src.startup import SERVER_VERSION, log_startup
+except ModuleNotFoundError as exc:
+    if exc.name not in {"src", "src.startup"}:
+        raise
+    from startup import SERVER_VERSION, log_startup
 
 
 # Keep the version probe independent from optional server runtime extras.
@@ -25,12 +30,28 @@ from pathlib import Path
 import logging
 from fastmcp.client.transports.stdio import StdioTransport
 import inspect
-from auth_manager import AuthManager
-from hybrid_searcher import HybridToolSearcher
-from rate_limiter import RateLimiterManager
-from circuit_breaker import CircuitBreakerManager, CircuitOpenError
-from config import Config
-from startup import log_startup
+
+try:
+    from src.auth_manager import AuthManager
+    from src.hybrid_searcher import HybridToolSearcher
+    from src.rate_limiter import RateLimiterManager
+    from src.circuit_breaker import CircuitBreakerManager, CircuitOpenError
+    from src.config import Config
+except ModuleNotFoundError as exc:
+    if exc.name not in {
+        "src",
+        "src.auth_manager",
+        "src.hybrid_searcher",
+        "src.rate_limiter",
+        "src.circuit_breaker",
+        "src.config",
+    }:
+        raise
+    from auth_manager import AuthManager
+    from hybrid_searcher import HybridToolSearcher
+    from rate_limiter import RateLimiterManager
+    from circuit_breaker import CircuitBreakerManager, CircuitOpenError
+    from config import Config
 
 
 logger = logging.getLogger(__name__)
