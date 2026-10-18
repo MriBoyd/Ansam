@@ -5,7 +5,7 @@ import subprocess
 
 def main():
     base = os.path.dirname(os.path.abspath(__file__))
-    manager_path = os.path.join(base, "../src/mcp_registry_manager.py")
+    manager_path = os.path.join(base, "../mcp_registry_manager.py")
     
     # Forward all arguments but set mode to flat
     cmd = [sys.executable, manager_path, "--mode", "flat"] + sys.argv[1:]
