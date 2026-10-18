@@ -14,6 +14,16 @@ from src.startup import SERVER_VERSION, log_startup, safe_endpoint
 ROOT = Path(__file__).resolve().parents[1]
 
 
+_ISOLATED_SRC_SUBMODULES = (
+    "auth_manager",
+    "hybrid_searcher",
+    "rate_limiter",
+    "circuit_breaker",
+    "config",
+    "mcp_server_production",
+)
+
+
 @contextlib.contextmanager
 def _isolated_src_modules():
     saved_src_modules = {
@@ -24,10 +34,9 @@ def _isolated_src_modules():
     src_pkg = sys.modules.get("src")
     saved_src_attrs = dict(src_pkg.__dict__) if src_pkg is not None else None
 
-    for name in ("src.auth_manager", "src.hybrid_searcher", "src.mcp_server_production"):
-        sys.modules.pop(name, None)
-    if src_pkg is not None:
-        for attr in ("auth_manager", "hybrid_searcher", "mcp_server_production"):
+    for attr in _ISOLATED_SRC_SUBMODULES:
+        sys.modules.pop(f"src.{attr}", None)
+        if src_pkg is not None:
             src_pkg.__dict__.pop(attr, None)
 
     try:
@@ -48,84 +57,68 @@ def _isolated_src_modules():
 
 
 def _install_fastmcp_stub(monkeypatch) -> None:
-    try:
-        import fastmcp  # noqa: F401
-    except ImportError:
-        fastmcp_mod = types.ModuleType("fastmcp")
+    fastmcp_mod = types.ModuleType("fastmcp")
 
-        class _FastMCP:
-            def __init__(self, *args, **kwargs):
-                pass
+    class _FastMCP:
+        def __init__(self, *args, **kwargs):
+            pass
 
-            def tool(self, *args, **kwargs):
-                def _decorator(fn):
-                    return fn
-                return _decorator
+        def tool(self, *args, **kwargs):
+            def _decorator(fn):
+                return fn
+            return _decorator
 
-            def __class_getitem__(cls, item):
-                return cls
+        def __class_getitem__(cls, item):
+            return cls
 
-        fastmcp_mod.FastMCP = _FastMCP
-        fastmcp_mod.Context = object
+    fastmcp_mod.FastMCP = _FastMCP
+    fastmcp_mod.Context = object
 
-        server_mod = types.ModuleType("fastmcp.server")
-        server_mod.create_proxy = lambda *args, **kwargs: None
+    server_mod = types.ModuleType("fastmcp.server")
+    server_mod.create_proxy = lambda *args, **kwargs: None
 
-        deps_mod = types.ModuleType("fastmcp.dependencies")
-        deps_mod.Progress = lambda *args, **kwargs: None
+    deps_mod = types.ModuleType("fastmcp.dependencies")
+    deps_mod.Progress = lambda *args, **kwargs: None
 
-        exc_mod = types.ModuleType("fastmcp.exceptions")
-        exc_mod.ToolError = RuntimeError
+    exc_mod = types.ModuleType("fastmcp.exceptions")
+    exc_mod.ToolError = RuntimeError
 
-        lifespan_mod = types.ModuleType("fastmcp.server.lifespan")
-        lifespan_mod.lifespan = lambda fn: fn
+    lifespan_mod = types.ModuleType("fastmcp.server.lifespan")
+    lifespan_mod.lifespan = lambda fn: fn
 
-        client_mod = types.ModuleType("fastmcp.client")
-        transports_mod = types.ModuleType("fastmcp.client.transports")
-        stdio_mod = types.ModuleType("fastmcp.client.transports.stdio")
-        stdio_mod.StdioTransport = object
+    client_mod = types.ModuleType("fastmcp.client")
+    transports_mod = types.ModuleType("fastmcp.client.transports")
+    stdio_mod = types.ModuleType("fastmcp.client.transports.stdio")
+    stdio_mod.StdioTransport = object
 
-        for name, mod in [
-            ("fastmcp", fastmcp_mod),
-            ("fastmcp.server", server_mod),
-            ("fastmcp.dependencies", deps_mod),
-            ("fastmcp.exceptions", exc_mod),
-            ("fastmcp.server.lifespan", lifespan_mod),
-            ("fastmcp.client", client_mod),
-            ("fastmcp.client.transports", transports_mod),
-            ("fastmcp.client.transports.stdio", stdio_mod),
-        ]:
-            monkeypatch.setitem(sys.modules, name, mod)
+    for name, mod in [
+        ("fastmcp", fastmcp_mod),
+        ("fastmcp.server", server_mod),
+        ("fastmcp.dependencies", deps_mod),
+        ("fastmcp.exceptions", exc_mod),
+        ("fastmcp.server.lifespan", lifespan_mod),
+        ("fastmcp.client", client_mod),
+        ("fastmcp.client.transports", transports_mod),
+        ("fastmcp.client.transports.stdio", stdio_mod),
+    ]:
+        monkeypatch.setitem(sys.modules, name, mod)
 
 
 def _install_search_third_party_stubs(monkeypatch) -> None:
-    try:
-        import httpx  # noqa: F401
-    except ImportError:
-        monkeypatch.setitem(sys.modules, "httpx", types.ModuleType("httpx"))
+    monkeypatch.setitem(sys.modules, "httpx", types.ModuleType("httpx"))
+    monkeypatch.setitem(sys.modules, "numpy", types.ModuleType("numpy"))
 
-    try:
-        import numpy  # noqa: F401
-    except ImportError:
-        monkeypatch.setitem(sys.modules, "numpy", types.ModuleType("numpy"))
+    qc_mod = types.ModuleType("qdrant_client")
+    qc_mod.QdrantClient = lambda *args, **kwargs: object()
+    models_mod = types.ModuleType("qdrant_client.models")
+    for attr in ("Distance", "VectorParams", "models", "Document", "PointStruct"):
+        setattr(models_mod, attr, object)
+    monkeypatch.setitem(sys.modules, "qdrant_client", qc_mod)
+    monkeypatch.setitem(sys.modules, "qdrant_client.models", models_mod)
 
-    try:
-        import qdrant_client  # noqa: F401
-    except ImportError:
-        qc_mod = types.ModuleType("qdrant_client")
-        qc_mod.QdrantClient = lambda *args, **kwargs: object()
-        models_mod = types.ModuleType("qdrant_client.models")
-        for attr in ("Distance", "VectorParams", "models", "Document", "PointStruct"):
-            setattr(models_mod, attr, object)
-        monkeypatch.setitem(sys.modules, "qdrant_client", qc_mod)
-        monkeypatch.setitem(sys.modules, "qdrant_client.models", models_mod)
-
-    try:
-        import rank_bm25  # noqa: F401
-    except ImportError:
-        bm25_mod = types.ModuleType("rank_bm25")
-        bm25_mod.BM25Okapi = object
-        monkeypatch.setitem(sys.modules, "rank_bm25", bm25_mod)
+    bm25_mod = types.ModuleType("rank_bm25")
+    bm25_mod.BM25Okapi = object
+    monkeypatch.setitem(sys.modules, "rank_bm25", bm25_mod)
 
 
 def test_version_flag_prints_version_and_exits_cleanly() -> None:
@@ -160,6 +153,7 @@ def test_package_level_import_succeeds(monkeypatch) -> None:
     before_src_modules = {
         k: v for k, v in sys.modules.items() if k == "src" or k.startswith("src.")
     }
+    before_src_attrs = dict(sys.modules["src"].__dict__)
 
     with _isolated_src_modules():
         mod = importlib.import_module("src.mcp_server_production")
@@ -172,6 +166,7 @@ def test_package_level_import_succeeds(monkeypatch) -> None:
         k: v for k, v in sys.modules.items() if k == "src" or k.startswith("src.")
     }
     assert after_src_modules == before_src_modules
+    assert dict(sys.modules["src"].__dict__) == before_src_attrs
 
 
 def test_package_level_import_propagates_third_party_import_error(monkeypatch) -> None:
@@ -182,6 +177,7 @@ def test_package_level_import_propagates_third_party_import_error(monkeypatch) -
     before_src_modules = {
         k: v for k, v in sys.modules.items() if k == "src" or k.startswith("src.")
     }
+    before_src_attrs = dict(sys.modules["src"].__dict__)
 
     with _isolated_src_modules():
         with pytest.raises(ModuleNotFoundError) as exc_info:
@@ -193,6 +189,7 @@ def test_package_level_import_propagates_third_party_import_error(monkeypatch) -
         k: v for k, v in sys.modules.items() if k == "src" or k.startswith("src.")
     }
     assert after_src_modules == before_src_modules
+    assert dict(sys.modules["src"].__dict__) == before_src_attrs
 
 
 def test_safe_endpoint_removes_credentials_and_query_parameters() -> None:
