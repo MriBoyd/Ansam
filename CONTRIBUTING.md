@@ -32,9 +32,9 @@ We are committed to providing a welcoming, inclusive, and harassment-free enviro
 
 If you are new to the project or open source in general, start with issues tagged:
 
-- [`good first issue`](https://github.com/MriBoyd/mcp-discovery-server-v1.2/labels/good%20first%20issue): Well-defined, scoped tasks with clear instructions.
-- [`help wanted`](https://github.com/MriBoyd/mcp-discovery-server-v1.2/labels/help%20wanted): Areas where the community would love extra hands.
-- [`documentation`](https://github.com/MriBoyd/mcp-discovery-server-v1.2/labels/documentation): Improvements to guides, docstrings, or examples.
+- [`good first issue`](https://github.com/MriBoyd/Ansam/labels/good%20first%20issue): Well-defined, scoped tasks with clear instructions.
+- [`help wanted`](https://github.com/MriBoyd/Ansam/labels/help%20wanted): Areas where the community would love extra hands.
+- [`documentation`](https://github.com/MriBoyd/Ansam/labels/documentation): Improvements to guides, docstrings, or examples.
 
 Before starting work on an issue, please leave a comment on the issue asking to be assigned, so multiple people don't work on the same task simultaneously.
 
@@ -55,11 +55,11 @@ Before starting work on an issue, please leave a comment on the issue asking to 
 
 ```bash
 # Fork the repo on GitHub first, then clone your fork:
-git clone https://github.com/<your-username>/mcp-discovery-server-v1.2.git
-cd mcp-discovery-server-v1.2
+git clone https://github.com/<your-username>/Ansam.git
+cd Ansam
 
 # Add the upstream remote
-git remote add upstream https://github.com/MriBoyd/mcp-discovery-server-v1.2.git
+git remote add upstream https://github.com/MriBoyd/Ansam.git
 ```
 
 ### 2. Set Up a Virtual Environment
@@ -183,7 +183,7 @@ We adhere to standard Python PEP 8 conventions:
    ```bash
    git push origin feat/my-new-feature
    ```
-6. **Open a Pull Request** against the `main` branch of `MriBoyd/mcp-discovery-server-v1.2`. Fill out the PR template completely.
+6. **Open a Pull Request** against the `main` branch of `MriBoyd/Ansam`. Fill out the PR template completely.
 
 ---
 
