@@ -19,6 +19,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Standalone runnable client examples for stdio (`examples/stdio_client.py`) and SSE (`examples/sse_client.py`) with comprehensive documentation ([#4](https://github.com/MriBoyd/Ansam/issues/4), [PR #6](https://github.com/MriBoyd/Ansam/pull/6)).
 - Contributing guide (`CONTRIBUTING.md`), issue templates for bug reports and beginner tasks, and pull request template.
 - Integration tests for `mcp_crawler` and extended concurrency unit tests for rate limiting.
+- Unit tests verifying package-level importability and module `--version` execution with isolated submodule state management ([PR #16](https://github.com/MriBoyd/Ansam/pull/16)).
 
 ### Changed
 - Renamed repository to **Ansam** (`MriBoyd/Ansam`) with updated documentation and clone instructions.
@@ -26,6 +27,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Switched default search retrieval pipeline to three-stage Qdrant hybrid retrieval: Dense embeddings (`all-MiniLM-L6-v2`), Sparse vectors (`Splade_PP_en_v1`), and ColBERT late-interaction reranking (`colbertv2.0`).
 
 ### Fixed
+- Fixed `ModuleNotFoundError` when importing `src.mcp_server_production` or executing as a module (`python -m src.mcp_server_production`) by resolving package-qualified imports with scoped fallback to bare module imports ([#9](https://github.com/MriBoyd/Ansam/issues/9), [PR #16](https://github.com/MriBoyd/Ansam/pull/16)).
 - Fixed lock-holding sleep in `TokenBucketRateLimiter.acquire()` that blocked concurrent callers, and added input guards to prevent deadlocks when requested tokens exceed capacity ([#11](https://github.com/MriBoyd/Ansam/issues/11), [PR #15](https://github.com/MriBoyd/Ansam/pull/15)).
 - Fixed invalid path calculation in `src/scripts/mcp_crawler.py` that caused `FileNotFoundError` ([#10](https://github.com/MriBoyd/Ansam/issues/10), [PR #14](https://github.com/MriBoyd/Ansam/pull/14)).
 - Sanitized sensitive credentials from startup logs to prevent secret leakage ([PR #5](https://github.com/MriBoyd/Ansam/pull/5)).
