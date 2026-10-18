@@ -79,7 +79,7 @@ def main():
     
     # 3. Index tools
     logger.info("Indexing tools into Qdrant...")
-    searcher.index(tools, force_reindex=args.force)
+    searcher.index(tools, recreate=args.force)
     
     logger.info("Indexing complete. Data is now persisted in Qdrant.")
 
