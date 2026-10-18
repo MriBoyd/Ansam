@@ -1,3 +1,4 @@
+import contextlib
 import importlib
 import logging
 import subprocess
@@ -11,6 +12,39 @@ from src.startup import SERVER_VERSION, log_startup, safe_endpoint
 
 
 ROOT = Path(__file__).resolve().parents[1]
+
+
+@contextlib.contextmanager
+def _isolated_src_modules():
+    saved_src_modules = {
+        name: mod
+        for name, mod in sys.modules.items()
+        if name == "src" or name.startswith("src.")
+    }
+    src_pkg = sys.modules.get("src")
+    saved_src_attrs = dict(src_pkg.__dict__) if src_pkg is not None else None
+
+    for name in ("src.auth_manager", "src.hybrid_searcher", "src.mcp_server_production"):
+        sys.modules.pop(name, None)
+    if src_pkg is not None:
+        for attr in ("auth_manager", "hybrid_searcher", "mcp_server_production"):
+            src_pkg.__dict__.pop(attr, None)
+
+    try:
+        yield
+    finally:
+        for name in [
+            k for k in list(sys.modules) if k == "src" or k.startswith("src.")
+        ]:
+            if name not in saved_src_modules:
+                sys.modules.pop(name, None)
+        for name, mod in saved_src_modules.items():
+            sys.modules[name] = mod
+        if src_pkg is not None and saved_src_attrs is not None:
+            for attr in list(src_pkg.__dict__):
+                if attr not in saved_src_attrs:
+                    delattr(src_pkg, attr)
+            src_pkg.__dict__.update(saved_src_attrs)
 
 
 def _install_fastmcp_stub(monkeypatch) -> None:
@@ -66,6 +100,11 @@ def _install_fastmcp_stub(monkeypatch) -> None:
 
 def _install_search_third_party_stubs(monkeypatch) -> None:
     try:
+        import httpx  # noqa: F401
+    except ImportError:
+        monkeypatch.setitem(sys.modules, "httpx", types.ModuleType("httpx"))
+
+    try:
         import numpy  # noqa: F401
     except ImportError:
         monkeypatch.setitem(sys.modules, "numpy", types.ModuleType("numpy"))
@@ -118,26 +157,42 @@ def test_module_version_flag_prints_version_and_exits_cleanly() -> None:
 def test_package_level_import_succeeds(monkeypatch) -> None:
     _install_fastmcp_stub(monkeypatch)
     _install_search_third_party_stubs(monkeypatch)
-    monkeypatch.delitem(sys.modules, "src.hybrid_searcher", raising=False)
-    monkeypatch.delitem(sys.modules, "src.mcp_server_production", raising=False)
+    before_src_modules = {
+        k: v for k, v in sys.modules.items() if k == "src" or k.startswith("src.")
+    }
 
-    mod = importlib.import_module("src.mcp_server_production")
-    assert hasattr(mod, "mcp")
-    assert hasattr(mod, "proxy_manager")
-    assert hasattr(mod, "auth_manager")
-    assert mod.HybridToolSearcher.__module__ == "src.hybrid_searcher"
+    with _isolated_src_modules():
+        mod = importlib.import_module("src.mcp_server_production")
+        assert hasattr(mod, "mcp")
+        assert hasattr(mod, "proxy_manager")
+        assert hasattr(mod, "auth_manager")
+        assert mod.HybridToolSearcher.__module__ == "src.hybrid_searcher"
+
+    after_src_modules = {
+        k: v for k, v in sys.modules.items() if k == "src" or k.startswith("src.")
+    }
+    assert after_src_modules == before_src_modules
 
 
 def test_package_level_import_propagates_third_party_import_error(monkeypatch) -> None:
     _install_fastmcp_stub(monkeypatch)
+    _install_search_third_party_stubs(monkeypatch)
     monkeypatch.setitem(sys.modules, "qdrant_client", None)
-    monkeypatch.delitem(sys.modules, "src.hybrid_searcher", raising=False)
-    monkeypatch.delitem(sys.modules, "src.mcp_server_production", raising=False)
+    monkeypatch.delitem(sys.modules, "qdrant_client.models", raising=False)
+    before_src_modules = {
+        k: v for k, v in sys.modules.items() if k == "src" or k.startswith("src.")
+    }
 
-    with pytest.raises(ModuleNotFoundError) as exc_info:
-        importlib.import_module("src.mcp_server_production")
+    with _isolated_src_modules():
+        with pytest.raises(ModuleNotFoundError) as exc_info:
+            importlib.import_module("src.mcp_server_production")
 
-    assert exc_info.value.name == "qdrant_client"
+        assert exc_info.value.name == "qdrant_client"
+
+    after_src_modules = {
+        k: v for k, v in sys.modules.items() if k == "src" or k.startswith("src.")
+    }
+    assert after_src_modules == before_src_modules
 
 
 def test_safe_endpoint_removes_credentials_and_query_parameters() -> None:
