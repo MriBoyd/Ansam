@@ -5,39 +5,15 @@ import sys
 import types
 from pathlib import Path
 
+import pytest
+
 from src.startup import SERVER_VERSION, log_startup, safe_endpoint
 
 
 ROOT = Path(__file__).resolve().parents[1]
 
 
-def test_version_flag_prints_version_and_exits_cleanly() -> None:
-    result = subprocess.run(
-        [sys.executable, "src/mcp_server_production.py", "--version"],
-        cwd=ROOT,
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-
-    assert result.returncode == 0
-    assert result.stdout.strip() == f"Ansam MCP Discovery Server v{SERVER_VERSION}"
-
-
-def test_module_version_flag_prints_version_and_exits_cleanly() -> None:
-    result = subprocess.run(
-        [sys.executable, "-m", "src.mcp_server_production", "--version"],
-        cwd=ROOT,
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-
-    assert result.returncode == 0
-    assert result.stdout.strip() == f"Ansam MCP Discovery Server v{SERVER_VERSION}"
-
-
-def test_package_level_import_succeeds(monkeypatch) -> None:
+def _install_fastmcp_stub(monkeypatch) -> None:
     try:
         import fastmcp  # noqa: F401
     except ImportError:
@@ -87,23 +63,81 @@ def test_package_level_import_succeeds(monkeypatch) -> None:
         ]:
             monkeypatch.setitem(sys.modules, name, mod)
 
+
+def _install_search_third_party_stubs(monkeypatch) -> None:
     try:
-        import src.hybrid_searcher  # noqa: F401
+        import numpy  # noqa: F401
     except ImportError:
-        hs_mod = types.ModuleType("src.hybrid_searcher")
+        monkeypatch.setitem(sys.modules, "numpy", types.ModuleType("numpy"))
 
-        class _HybridToolSearcher:
-            def __init__(self, *args, **kwargs):
-                self.is_indexed = False
+    try:
+        import qdrant_client  # noqa: F401
+    except ImportError:
+        qc_mod = types.ModuleType("qdrant_client")
+        qc_mod.QdrantClient = lambda *args, **kwargs: object()
+        models_mod = types.ModuleType("qdrant_client.models")
+        for attr in ("Distance", "VectorParams", "models", "Document", "PointStruct"):
+            setattr(models_mod, attr, object)
+        monkeypatch.setitem(sys.modules, "qdrant_client", qc_mod)
+        monkeypatch.setitem(sys.modules, "qdrant_client.models", models_mod)
 
-        hs_mod.HybridToolSearcher = _HybridToolSearcher
-        monkeypatch.setitem(sys.modules, "src.hybrid_searcher", hs_mod)
+    try:
+        import rank_bm25  # noqa: F401
+    except ImportError:
+        bm25_mod = types.ModuleType("rank_bm25")
+        bm25_mod.BM25Okapi = object
+        monkeypatch.setitem(sys.modules, "rank_bm25", bm25_mod)
 
+
+def test_version_flag_prints_version_and_exits_cleanly() -> None:
+    result = subprocess.run(
+        [sys.executable, "src/mcp_server_production.py", "--version"],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0
+    assert result.stdout.strip() == f"Ansam MCP Discovery Server v{SERVER_VERSION}"
+
+
+def test_module_version_flag_prints_version_and_exits_cleanly() -> None:
+    result = subprocess.run(
+        [sys.executable, "-m", "src.mcp_server_production", "--version"],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0
+    assert result.stdout.strip() == f"Ansam MCP Discovery Server v{SERVER_VERSION}"
+
+
+def test_package_level_import_succeeds(monkeypatch) -> None:
+    _install_fastmcp_stub(monkeypatch)
+    _install_search_third_party_stubs(monkeypatch)
+    monkeypatch.delitem(sys.modules, "src.hybrid_searcher", raising=False)
     monkeypatch.delitem(sys.modules, "src.mcp_server_production", raising=False)
+
     mod = importlib.import_module("src.mcp_server_production")
     assert hasattr(mod, "mcp")
     assert hasattr(mod, "proxy_manager")
     assert hasattr(mod, "auth_manager")
+    assert mod.HybridToolSearcher.__module__ == "src.hybrid_searcher"
+
+
+def test_package_level_import_propagates_third_party_import_error(monkeypatch) -> None:
+    _install_fastmcp_stub(monkeypatch)
+    monkeypatch.setitem(sys.modules, "qdrant_client", None)
+    monkeypatch.delitem(sys.modules, "src.hybrid_searcher", raising=False)
+    monkeypatch.delitem(sys.modules, "src.mcp_server_production", raising=False)
+
+    with pytest.raises(ModuleNotFoundError) as exc_info:
+        importlib.import_module("src.mcp_server_production")
+
+    assert exc_info.value.name == "qdrant_client"
 
 
 def test_safe_endpoint_removes_credentials_and_query_parameters() -> None:

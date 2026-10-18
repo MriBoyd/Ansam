@@ -4,7 +4,9 @@ import sys
 
 try:
     from src.startup import SERVER_VERSION, log_startup
-except ImportError:
+except ModuleNotFoundError as exc:
+    if exc.name not in {"src", "src.startup"}:
+        raise
     from startup import SERVER_VERSION, log_startup
 
 
@@ -35,7 +37,16 @@ try:
     from src.rate_limiter import RateLimiterManager
     from src.circuit_breaker import CircuitBreakerManager, CircuitOpenError
     from src.config import Config
-except ImportError:
+except ModuleNotFoundError as exc:
+    if exc.name not in {
+        "src",
+        "src.auth_manager",
+        "src.hybrid_searcher",
+        "src.rate_limiter",
+        "src.circuit_breaker",
+        "src.config",
+    }:
+        raise
     from auth_manager import AuthManager
     from hybrid_searcher import HybridToolSearcher
     from rate_limiter import RateLimiterManager
