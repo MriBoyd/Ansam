@@ -37,6 +37,10 @@ class Config:
     # Qdrant Vector DB
     QDRANT_URL = os.getenv("QDRANT_URL", "http://localhost:6333")
     QDRANT_COLLECTION = os.getenv("QDRANT_COLLECTION", "mcp_tools")
+    QDRANT_MAX_RETRIES = int(os.getenv("QDRANT_MAX_RETRIES", "5"))
+    QDRANT_RETRY_DELAY = float(os.getenv("QDRANT_RETRY_DELAY", "1.0"))
+    QDRANT_MAX_RETRY_DELAY = float(os.getenv("QDRANT_MAX_RETRY_DELAY", "16.0"))
+    QDRANT_BACKOFF_FACTOR = float(os.getenv("QDRANT_BACKOFF_FACTOR", "2.0"))
     
     # Connection Pool settings
     MAX_OPEN_CONNECTIONS = int(os.getenv("MAX_OPEN_CONNECTIONS", "32"))
