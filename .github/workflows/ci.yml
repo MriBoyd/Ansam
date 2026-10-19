@@ -1,0 +1,39 @@
+name: CI
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.10", "3.11", "3.12"]
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v5
+      with:
+        python-version: ${{ matrix.python-version }}
+        cache: 'pip'
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install --extra-index-url https://download.pytorch.org/whl/cpu "torch==2.11.0+cpu"
+        if [ "${{ matrix.python-version }}" = "3.10" ]; then
+          grep -v '^numpy==' requirements.txt > /tmp/requirements-ci.txt
+          pip install -r /tmp/requirements-ci.txt "numpy>=1.26.0,<2.3"
+        else
+          pip install -r requirements.txt
+        fi
+        pip install -e ".[dev]"
+
+    - name: Run unit tests
+      run: |
+        pytest -v tests/test_circuit_breaker.py tests/test_auth_manager.py tests/test_rate_limiter.py tests/test_config.py tests/test_extract_registry.py tests/test_mcp_server_production.py tests/test_ci_workflow.py
