@@ -39,7 +39,9 @@ def test_ci_workflow_matrix_covers_python_310_311_312() -> None:
     test_job = jobs["test"]
     assert test_job.get("runs-on") == "ubuntu-latest"
 
-    matrix = test_job.get("strategy", {}).get("matrix", {})
+    strategy = test_job.get("strategy", {})
+    assert strategy.get("fail-fast") is False
+    matrix = strategy.get("matrix", {})
     assert matrix.get("python-version") == ["3.10", "3.11", "3.12"]
 
 
