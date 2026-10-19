@@ -28,8 +28,14 @@ class AuthManager:
 
     def _save_tokens(self):
         try:
-            with open(self.storage_path, "w") as f:
+            fd = os.open(
+                self.storage_path,
+                os.O_WRONLY | os.O_CREAT | os.O_TRUNC,
+                0o600,
+            )
+            with os.fdopen(fd, "w") as f:
                 json.dump(self.tokens, f, indent=2)
+            os.chmod(self.storage_path, 0o600)
         except Exception as e:
             logging.error(f"Failed to save tokens: {e}")
 

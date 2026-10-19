@@ -1,6 +1,7 @@
 import unittest
 import json
 import os
+import stat
 import time
 import tempfile
 from unittest.mock import patch, MagicMock, AsyncMock
@@ -27,6 +28,25 @@ class TestAuthManager(unittest.IsolatedAsyncioTestCase):
         new_manager = AuthManager(storage_path=self.storage_path)
         self.assertIn("test_server", new_manager.tokens)
         self.assertEqual(new_manager.tokens["test_server"]["access_token"], "test_token")
+
+    def test_save_tokens_sets_restrictive_permissions_call(self):
+        token_data = {"access_token": "secret_token", "expires_in": 3600}
+        with patch("src.auth_manager.os.chmod") as mock_chmod:
+            self.auth_manager.save_token_data("test_server", token_data)
+            mock_chmod.assert_called_once_with(Path(self.storage_path), 0o600)
+
+    @unittest.skipIf(os.name == "nt", "POSIX file mode bits are not enforced on Windows")
+    def test_save_tokens_file_permissions_posix(self):
+        token_data = {"access_token": "secret_token", "expires_in": 3600}
+        self.auth_manager.save_token_data("test_server", token_data)
+        mode = stat.S_IMODE(os.stat(self.storage_path).st_mode)
+        self.assertEqual(mode, 0o600)
+
+        # Tighten permissions if file already exists with broader mode
+        os.chmod(self.storage_path, 0o644)
+        self.auth_manager.save_token_data("test_server", token_data)
+        mode_after = stat.S_IMODE(os.stat(self.storage_path).st_mode)
+        self.assertEqual(mode_after, 0o600)
 
     def test_get_token_valid(self):
         expires_at = time.time() + 3600
@@ -127,3 +147,4 @@ class TestAuthManager(unittest.IsolatedAsyncioTestCase):
 
 if __name__ == "__main__":
     unittest.main()
+

@@ -224,3 +224,6 @@ tempCodeRunnerFile*
 .env
 .env.*
 !.env.example
+
+# OAuth credentials
+tokens.json
