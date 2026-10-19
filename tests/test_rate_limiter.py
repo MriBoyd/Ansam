@@ -1,7 +1,9 @@
-import unittest
 import asyncio
 import time
-from src.rate_limiter import TokenBucketRateLimiter, RateLimiterManager
+import unittest
+
+from src.rate_limiter import RateLimiterManager, TokenBucketRateLimiter
+
 
 class TestRateLimiter(unittest.IsolatedAsyncioTestCase):
     async def test_try_acquire_success(self):
@@ -61,10 +63,9 @@ class TestRateLimiter(unittest.IsolatedAsyncioTestCase):
         # without being blocked for 1s by the waiting acquire task
         lock_acquired_immediately = False
         try:
-            async with asyncio.timeout(0.1):
-                await limiter.try_acquire(1)
-                lock_acquired_immediately = True
-        except TimeoutError:
+            await asyncio.wait_for(limiter.try_acquire(1), timeout=0.1)
+            lock_acquired_immediately = True
+        except asyncio.TimeoutError:
             lock_acquired_immediately = False
 
         self.assertTrue(lock_acquired_immediately)
