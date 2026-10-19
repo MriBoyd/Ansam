@@ -2,6 +2,13 @@
 import os
 
 try:
+    from dotenv import load_dotenv
+
+    load_dotenv()
+except ImportError:
+    pass
+
+try:
     import torch
     _has_cuda = torch.cuda.is_available()
 except ImportError:
