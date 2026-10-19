@@ -1,40 +1,58 @@
-# tests/test_performance.py
-import time
+import os
 import statistics
-from tests.test_hybrid_searcher import TestPerformance
+import sys
+import time
 
-def benchmark_search_performance():
-    """Benchmark search performance with different tool counts"""
-    test = TestPerformance()
-    test.setUp()
-    
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from tests.test_hybrid_searcher import create_benchmark_searcher  # noqa: E402
+
+
+def benchmark_search_performance() -> dict:
+    """Benchmark search performance with 100 tools against the current HybridToolSearcher API."""
+    searcher, large_tools = create_benchmark_searcher()
+
     index_times = []
     search_times = []
     exact_times = []
-    
+
     # Warm up
-    test.searcher.index(test.large_tools)
-    
-    for i in range(10):
-        # Index time (should be fast if already indexed)
+    searcher.index(large_tools, recreate=True)
+
+    for _ in range(10):
+        # Incremental index time (fast when points are already indexed)
         start_index = time.time()
-        test.searcher.index(test.large_tools)
+        searcher.index(large_tools, recreate=False)
         index_times.append(time.time() - start_index)
-        
+
         # Semantic Search time
         start_search = time.time()
-        test.searcher.search("find a tool for data analysis") # Semantic query
+        searcher.search("find a tool for data analysis", limit=5)
         search_times.append(time.time() - start_search)
-        
+
         # Exact Match time
         start_exact = time.time()
-        test.searcher.search("tool_5") # Exact name query
+        searcher.search("tool_5", limit=5)
         exact_times.append(time.time() - start_exact)
-    
-    print(f"\nBenchmark Results (100 tools):")
-    print(f"Index Mean: {statistics.mean(index_times):.3f}s")
-    print(f"Semantic Search Mean: {statistics.mean(search_times):.3f}s")
-    print(f"Exact Match Mean: {statistics.mean(exact_times):.3f}s")
+
+    summary = {
+        "index_mean": statistics.mean(index_times),
+        "search_mean": statistics.mean(search_times),
+        "exact_mean": statistics.mean(exact_times),
+    }
+    print("\nBenchmark Results (100 tools):")
+    print(f"Index Mean: {summary['index_mean']:.3f}s")
+    print(f"Semantic Search Mean: {summary['search_mean']:.3f}s")
+    print(f"Exact Match Mean: {summary['exact_mean']:.3f}s")
+    return summary
+
+
+def test_benchmark_search_performance() -> None:
+    summary = benchmark_search_performance()
+    assert summary["index_mean"] < 10.0
+    assert summary["search_mean"] < 5.0
+    assert summary["exact_mean"] < 5.0
+
 
 if __name__ == "__main__":
     benchmark_search_performance()
