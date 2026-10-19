@@ -14,6 +14,14 @@ from qdrant_client.models import (
 )
 from rank_bm25 import BM25Okapi
 
+try:
+    from src.config import Config
+except ModuleNotFoundError as exc:
+    if exc.name not in {"src", "src.config"}:
+        raise
+    from config import Config  # type: ignore[no-redef]
+
+
 class HybridToolSearcher:
     """
     Advanced Three-Stage Hybrid Searcher:
@@ -28,27 +36,104 @@ class HybridToolSearcher:
         collection_name: str = "tool-search",
         dense_model: str = "sentence-transformers/all-MiniLM-L6-v2",
         sparse_model: str = "prithivida/Splade_PP_en_v1",
-        rerank_model: str = "colbert-ir/colbertv2.0"
+        rerank_model: str = "colbert-ir/colbertv2.0",
+        max_retries: Optional[int] = None,
+        retry_delay: Optional[float] = None,
+        max_retry_delay: Optional[float] = None,
+        backoff_factor: Optional[float] = None,
     ):
-        self.client = QdrantClient(url=qdrant_url)
+        self.qdrant_url = qdrant_url
         self.collection_name = collection_name
         self.dense_model = dense_model
         self.sparse_model = sparse_model
         self.rerank_model = rerank_model
 
+        resolved_retries = (
+            max_retries
+            if max_retries is not None
+            else getattr(Config, "QDRANT_MAX_RETRIES", 5)
+        )
+        self.max_retries = max(1, int(resolved_retries))
+        self.retry_delay = max(
+            0.0,
+            float(
+                retry_delay
+                if retry_delay is not None
+                else getattr(Config, "QDRANT_RETRY_DELAY", 1.0)
+            ),
+        )
+        self.max_retry_delay = max(
+            self.retry_delay,
+            float(
+                max_retry_delay
+                if max_retry_delay is not None
+                else getattr(Config, "QDRANT_MAX_RETRY_DELAY", 16.0)
+            ),
+        )
+        self.backoff_factor = max(
+            1.0,
+            float(
+                backoff_factor
+                if backoff_factor is not None
+                else getattr(Config, "QDRANT_BACKOFF_FACTOR", 2.0)
+            ),
+        )
+        self.client = self._connect_qdrant()
+
         # State
-        self.tools = []
+        self.tools: List[Dict[str, Any]] = []
         self.bm25 = None
         self.is_indexed = False
 
         # Caching
-        self._cache = OrderedDict()
+        self._cache: OrderedDict[str, Any] = OrderedDict()
         self._max_cache_size = 200
         self._cache_ttl = 3600  # 1 hour
 
         # Regex for tokenization
         self.token_pattern = re.compile(r'[^a-zA-Z0-9]')
         self.camel_pattern = re.compile(r'([a-z])([A-Z])')
+
+    def _connect_qdrant(self) -> Any:
+        """Connect to Qdrant and verify readiness with exponential backoff."""
+        last_error: Optional[Exception] = None
+        for attempt in range(1, self.max_retries + 1):
+            try:
+                client = QdrantClient(url=self.qdrant_url)
+                get_collections = getattr(client, "get_collections", None)
+                if callable(get_collections):
+                    get_collections()
+                else:
+                    collection_exists = getattr(client, "collection_exists", None)
+                    if callable(collection_exists):
+                        collection_exists(self.collection_name)
+                return client
+            except Exception as exc:
+                last_error = exc
+                if attempt < self.max_retries:
+                    delay = min(
+                        self.retry_delay * (self.backoff_factor ** (attempt - 1)),
+                        self.max_retry_delay,
+                    )
+                    logging.warning(
+                        "Waiting for Qdrant to be ready (attempt %d/%d)... "
+                        "connection to %s failed (%s); retrying in %.1fs",
+                        attempt + 1,
+                        self.max_retries,
+                        self.qdrant_url,
+                        exc,
+                        delay,
+                    )
+                    time.sleep(delay)
+
+        error_msg = (
+            f"Failed to connect to Qdrant at {self.qdrant_url} after "
+            f"{self.max_retries} attempts: {last_error}. "
+            "Please ensure Qdrant is running (for example: "
+            "`docker run -p 6333:6333 qdrant/qdrant` or `docker compose up -d qdrant`)."
+        )
+        logging.error(error_msg)
+        raise ConnectionError(error_msg) from last_error
 
     # =========================
     # CORE UTILS
