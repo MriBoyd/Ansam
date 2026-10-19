@@ -31,11 +31,21 @@ class TestAuthManager(unittest.IsolatedAsyncioTestCase):
 
     def test_save_tokens_sets_restrictive_permissions_call(self):
         token_data = {"access_token": "secret_token", "expires_in": 3600}
-        with patch("src.auth_manager.os.chmod") as mock_chmod:
+        with (
+            patch("src.auth_manager.os.open", wraps=os.open) as mock_open,
+            patch("src.auth_manager.os.chmod") as mock_chmod,
+        ):
             self.auth_manager.save_token_data("test_server", token_data)
+            mock_open.assert_called_once_with(
+                Path(self.storage_path),
+                os.O_WRONLY | os.O_CREAT | os.O_TRUNC,
+                0o600,
+            )
             mock_chmod.assert_called_once_with(Path(self.storage_path), 0o600)
 
-    @unittest.skipIf(os.name == "nt", "POSIX file mode bits are not enforced on Windows")
+    @unittest.skipIf(
+        os.name == "nt", "POSIX file mode bits are not enforced on Windows"
+    )
     def test_save_tokens_file_permissions_posix(self):
         token_data = {"access_token": "secret_token", "expires_in": 3600}
         self.auth_manager.save_token_data("test_server", token_data)
@@ -147,4 +157,3 @@ class TestAuthManager(unittest.IsolatedAsyncioTestCase):
 
 if __name__ == "__main__":
     unittest.main()
-

@@ -33,9 +33,14 @@ class AuthManager:
                 os.O_WRONLY | os.O_CREAT | os.O_TRUNC,
                 0o600,
             )
-            with os.fdopen(fd, "w") as f:
-                json.dump(self.tokens, f, indent=2)
-            os.chmod(self.storage_path, 0o600)
+            try:
+                os.chmod(self.storage_path, 0o600)
+                with os.fdopen(fd, "w") as f:
+                    fd = -1
+                    json.dump(self.tokens, f, indent=2)
+            finally:
+                if fd >= 0:
+                    os.close(fd)
         except Exception as e:
             logging.error(f"Failed to save tokens: {e}")
 
