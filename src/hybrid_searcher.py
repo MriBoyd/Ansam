@@ -222,10 +222,19 @@ class HybridToolSearcher:
     # INDEXING
     # =========================
 
-    def index(self, tools_data: Any, recreate: bool = False, batch_size: int = 32):
+    def index(
+        self,
+        tools_data: Any,
+        recreate: bool = False,
+        batch_size: int = 32,
+        force_reindex: Optional[bool] = None,
+    ):
         """
         Main indexing entry point.
         """
+        if force_reindex is not None:
+            recreate = force_reindex
+
         # 1. Flatten tools (support list or dict input)
         self.tools = []
         # Normalize incoming structure: allow list of servers or a dict mapping
@@ -244,9 +253,13 @@ class HybridToolSearcher:
             # server should be a dict; guard defensively
             if not isinstance(server, dict):
                 continue
-            for tool in server.get("tools", []):
-                tool["server"] = server.get("name", "unknown")
-                self.tools.append(tool)
+            if "tools" in server and isinstance(server["tools"], list):
+                for tool in server.get("tools", []):
+                    tool["server"] = server.get("name", "unknown")
+                    self.tools.append(tool)
+            elif "name" in server:
+                server.setdefault("server", server.get("server_origin", "unknown"))
+                self.tools.append(server)
         
         if not self.tools:
             logging.warning("No tools found to index.")
@@ -342,8 +355,11 @@ class HybridToolSearcher:
             "colbert": 0.6,
             "rrf": 0.25,
             "bm25": 0.15
-        }
+        },
+        top_k: Optional[int] = None,
     ) -> List[Dict[str, Any]]:
+        if top_k is not None:
+            limit = top_k
         if not self.is_indexed:
             logging.warning("Search called before indexing.")
             return []           

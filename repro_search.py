@@ -52,11 +52,11 @@ def test_capability_search():
 
     searcher = HybridToolSearcher()
     print("Indexing tools (forcing re-index)...")
-    searcher.index(tools, force_reindex=True)
+    searcher.index(tools, recreate=True)
 
     query = "tool that takes a URL"
     print(f"\nSearching for: '{query}'")
-    results = searcher.search(query, top_k=5)
+    results = searcher.search(query, limit=5)
 
     print("\nResults:")
     for i, res in enumerate(results):
