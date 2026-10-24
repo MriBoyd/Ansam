@@ -14,6 +14,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Backwards-compatible `force_reindex` and `top_k` parameter aliases in `HybridToolSearcher` ([#13](https://github.com/MriBoyd/Ansam/issues/13), [PR #17](https://github.com/MriBoyd/Ansam/pull/17)).
 
 ### Fixed
+- Cleaned up obsolete test modules (`test_code_embedder.py` and `test_local_reranker.py`) from the pre-ColBERT architecture and fixed pytest collection errors ([#7](https://github.com/MriBoyd/Ansam/issues/7), [PR #20](https://github.com/MriBoyd/Ansam/pull/20)).
+- Consolidated mock search dependency stubs in `tests/conftest.py` (`Distance.COSINE`, `_KwargStruct`, and `FallbackBM25Okapi`) to eliminate execution-order mock collisions and missing attribute errors ([#7](https://github.com/MriBoyd/Ansam/issues/7), [PR #20](https://github.com/MriBoyd/Ansam/pull/20)).
+- Updated `tests/test_score_normalization.py` to validate `HybridToolSearcher._min_max_scale()` across multi-value, single-value, empty, identical, and mixed-sign score sets ([#7](https://github.com/MriBoyd/Ansam/issues/7), [PR #20](https://github.com/MriBoyd/Ansam/pull/20)).
+- Updated `tests/test_hybrid_searcher.py` and `tests/test_performance.py` to match the current `HybridToolSearcher` API and extracted `create_benchmark_searcher()` to prevent duplicate test collection and class name collisions ([#7](https://github.com/MriBoyd/Ansam/issues/7), [PR #20](https://github.com/MriBoyd/Ansam/pull/20)).
 - Fixed `TypeError` in `src/scripts/index_tools.py` and `repro_search.py` by aligning `recreate` and `limit` parameter names with `HybridToolSearcher` ([#13](https://github.com/MriBoyd/Ansam/issues/13), [PR #17](https://github.com/MriBoyd/Ansam/pull/17)).
 - Supported flat tool list ingestion in `HybridToolSearcher.index()` alongside server-grouped structures ([#13](https://github.com/MriBoyd/Ansam/issues/13), [PR #17](https://github.com/MriBoyd/Ansam/pull/17)).
 
