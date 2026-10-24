@@ -32,8 +32,8 @@ class HybridToolSearcher:
 
     def __init__(
         self,
-        qdrant_url: str = "http://0.0.0.0:6333",
-        collection_name: str = "tool-search",
+        qdrant_url: Optional[str] = None,
+        collection_name: Optional[str] = None,
         dense_model: str = "sentence-transformers/all-MiniLM-L6-v2",
         sparse_model: str = "prithivida/Splade_PP_en_v1",
         rerank_model: str = "colbert-ir/colbertv2.0",
@@ -42,8 +42,16 @@ class HybridToolSearcher:
         max_retry_delay: Optional[float] = None,
         backoff_factor: Optional[float] = None,
     ):
-        self.qdrant_url = qdrant_url
-        self.collection_name = collection_name
+        self.qdrant_url = (
+            qdrant_url
+            if qdrant_url is not None
+            else getattr(Config, "QDRANT_URL", "http://localhost:6333")
+        )
+        self.collection_name = (
+            collection_name
+            if collection_name is not None
+            else getattr(Config, "QDRANT_COLLECTION", "mcp_tools")
+        )
         self.dense_model = dense_model
         self.sparse_model = sparse_model
         self.rerank_model = rerank_model
