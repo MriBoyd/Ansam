@@ -20,6 +20,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Updated `tests/test_hybrid_searcher.py` and `tests/test_performance.py` to match the current `HybridToolSearcher` API and extracted `create_benchmark_searcher()` to prevent duplicate test collection and class name collisions ([#7](https://github.com/MriBoyd/Ansam/issues/7), [PR #20](https://github.com/MriBoyd/Ansam/pull/20)).
 - Fixed `TypeError` in `src/scripts/index_tools.py` and `repro_search.py` by aligning `recreate` and `limit` parameter names with `HybridToolSearcher` ([#13](https://github.com/MriBoyd/Ansam/issues/13), [PR #17](https://github.com/MriBoyd/Ansam/pull/17)).
 - Supported flat tool list ingestion in `HybridToolSearcher.index()` alongside server-grouped structures ([#13](https://github.com/MriBoyd/Ansam/issues/13), [PR #17](https://github.com/MriBoyd/Ansam/pull/17)).
+- `HybridToolSearcher` now defaults `qdrant_url` and `collection_name` to `Config.QDRANT_URL` and `Config.QDRANT_COLLECTION` instead of hardcoded `http://0.0.0.0:6333` / `tool-search`, so `.env` settings apply to both `src/scripts/index_tools.py` indexing and `src/mcp_server_production.py` search ([#25](https://github.com/MriBoyd/Ansam/issues/25)).
 
 ### Security
 - Added `tokens.json` to `.gitignore` to prevent committing OAuth credentials to version control ([#12](https://github.com/MriBoyd/Ansam/issues/12), [PR #18](https://github.com/MriBoyd/Ansam/pull/18)).

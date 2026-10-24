@@ -1,3 +1,4 @@
+import importlib
 import os
 import re
 import sys
@@ -13,6 +14,8 @@ from tests.conftest import ensure_search_dependencies  # noqa: E402
 
 ensure_search_dependencies()
 
+import src.config  # noqa: E402
+import src.hybrid_searcher as hybrid_searcher_module  # noqa: E402
 from src.config import Config  # noqa: E402
 from src.hybrid_searcher import HybridToolSearcher  # noqa: E402
 
@@ -147,7 +150,8 @@ class TestHybridToolSearcher(unittest.TestCase):
     def test_initialization(self) -> None:
         """Searcher initializes client, model identifiers, and empty state."""
         self.assertIsNotNone(self.searcher.client)
-        self.assertEqual(self.searcher.collection_name, "tool-search")
+        self.assertEqual(self.searcher.collection_name, hybrid_searcher_module.Config.QDRANT_COLLECTION)
+        self.assertEqual(self.searcher.qdrant_url, hybrid_searcher_module.Config.QDRANT_URL)
         self.assertEqual(self.searcher.dense_model, "sentence-transformers/all-MiniLM-L6-v2")
         self.assertEqual(self.searcher.sparse_model, "prithivida/Splade_PP_en_v1")
         self.assertEqual(self.searcher.rerank_model, "colbert-ir/colbertv2.0")
@@ -195,11 +199,12 @@ class TestHybridToolSearcher(unittest.TestCase):
         self.assertTrue(self.searcher.is_indexed)
         self.assertIsNotNone(self.searcher.bm25)
         self.assertEqual(len(self.searcher.tools), 3)
-        self.assertEqual(len(self.searcher.client.collections["tool-search"]), 3)
+        collection = self.searcher.collection_name
+        self.assertEqual(len(self.searcher.client.collections[collection]), 3)
 
         # Re-indexing with recreate=True deletes and recreates the collection
         self.searcher.index({"servers": self.sample_tools}, recreate=True)
-        self.assertIn("tool-search", self.searcher.client.deleted_collections)
+        self.assertIn(collection, self.searcher.client.deleted_collections)
         self.assertEqual(len(self.searcher.tools), 3)
 
     def test_search_pipeline_and_limit(self) -> None:
@@ -258,6 +263,60 @@ class TestHybridSearcherConfig(unittest.TestCase):
     def test_fusion_weights(self) -> None:
         total = Config.BM25_WEIGHT + Config.DENSE_WEIGHT
         self.assertAlmostEqual(total, 1.0, places=5)
+
+
+class TestHybridSearcherQdrantDefaults(unittest.TestCase):
+    """HybridToolSearcher resolves its Qdrant URL and collection from Config (#25)."""
+
+    def _make_searcher(self, **kwargs: Any) -> HybridToolSearcher:
+        with patch("src.hybrid_searcher.QdrantClient", side_effect=_InMemoryQdrantClient) as mock_cls:
+            searcher = HybridToolSearcher(**kwargs)
+        mock_cls.assert_called_once_with(url=searcher.qdrant_url)
+        return searcher
+
+    def test_defaults_to_config_values(self) -> None:
+        with (
+            patch.object(hybrid_searcher_module.Config, "QDRANT_URL", "http://config-host:6333"),
+            patch.object(hybrid_searcher_module.Config, "QDRANT_COLLECTION", "config_tools"),
+        ):
+            searcher = self._make_searcher()
+
+        self.assertEqual(searcher.qdrant_url, "http://config-host:6333")
+        self.assertEqual(searcher.collection_name, "config_tools")
+
+    def test_explicit_arguments_override_config(self) -> None:
+        with (
+            patch.object(hybrid_searcher_module.Config, "QDRANT_URL", "http://config-host:6333"),
+            patch.object(hybrid_searcher_module.Config, "QDRANT_COLLECTION", "config_tools"),
+        ):
+            searcher = self._make_searcher(
+                qdrant_url="http://explicit-host:6333",
+                collection_name="explicit_tools",
+            )
+
+        self.assertEqual(searcher.qdrant_url, "http://explicit-host:6333")
+        self.assertEqual(searcher.collection_name, "explicit_tools")
+
+    def test_env_collection_propagates_to_indexing_and_search(self) -> None:
+        """QDRANT_COLLECTION from the environment is used for both index() and search()."""
+        env_vars = {"QDRANT_URL": "http://env-host:6333", "QDRANT_COLLECTION": "env_tools"}
+        with patch.dict(os.environ, env_vars):
+            env_config = importlib.reload(src.config).Config
+        self.addCleanup(importlib.reload, src.config)
+
+        with patch.object(hybrid_searcher_module, "Config", env_config):
+            searcher = self._make_searcher()
+
+        self.assertEqual(searcher.qdrant_url, "http://env-host:6333")
+        self.assertEqual(searcher.collection_name, "env_tools")
+
+        searcher.index(_make_sample_servers())
+        self.assertEqual(list(searcher.client.collections), ["env_tools"])
+        self.assertEqual(len(searcher.client.collections["env_tools"]), 3)
+
+        # The in-memory client only returns points stored in the queried collection.
+        results = searcher.search("create a github issue", limit=1)
+        self.assertGreater(len(results), 0)
 
 
 def create_benchmark_searcher(num_tools: int = 100) -> Tuple[HybridToolSearcher, List[Dict[str, Any]]]:
