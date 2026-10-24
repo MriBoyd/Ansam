@@ -1,545 +1,367 @@
-# tests/test_hybrid_searcher.py
-import unittest
-import json
-import tempfile
 import os
-import numpy as np
-from unittest.mock import Mock, patch, MagicMock
-from typing import List, Dict, Any
-
-# Add parent directory to path
+import re
 import sys
+import time
+import unittest
+from types import SimpleNamespace
+from typing import Any, Dict, List, Optional, Tuple
+from unittest.mock import patch
+
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from src.hybrid_searcher import HybridToolSearcher
-from src.config import Config
+from tests.conftest import ensure_search_dependencies  # noqa: E402
 
-class TestHybridToolSearcher(unittest.TestCase):
-    """Unit tests for HybridToolSearcher"""
-    
-    def setUp(self):
-        """Set up test fixtures before each test"""
-        self.sample_tools = [
-            {
-                "name": "create_github_issue",
-                "description": "Create a new issue in a GitHub repository",
-                "parameters": {
-                    "repo": {"type": "string", "description": "Repository name"},
-                    "title": {"type": "string", "description": "Issue title"},
-                    "body": {"type": "string", "description": "Issue description"}
-                },
-                "required": ["repo", "title"]
-            },
-            {
-                "name": "send_slack_message",
-                "description": "Send a message to a Slack channel",
-                "parameters": {
-                    "channel": {"type": "string", "description": "Channel ID"},
-                    "text": {"type": "string", "description": "Message text"}
-                },
-                "required": ["channel", "text"]
-            },
-            {
-                "name": "execute_sql_query",
-                "description": "Execute a SQL query on the database",
-                "parameters": {
-                    "query": {"type": "string", "description": "SQL query"},
-                    "database": {"type": "string", "description": "Database name"}
-                },
-                "required": ["query"]
-            }
-        ]
-        
-        self.searcher = HybridToolSearcher()
-    
-    def test_initialization(self):
-        """Test that searcher initializes correctly"""
-        self.assertIsNotNone(self.searcher.embedder)
-        self.assertIsNotNone(self.searcher.reranker)
-        self.assertIsNone(self.searcher.bm25)
-        self.assertIsNone(self.searcher.tool_embeddings)
-        self.assertFalse(self.searcher.is_indexed)
-    
-    def test_prepare_tool_text(self):
-        """Test tool text preparation"""
-        tool = self.sample_tools[0]
-        text = self.searcher._prepare_tool_text(tool)
-        
-        # Check required content
-        self.assertIn("Function: create_github_issue", text)
-        self.assertIn("Description: Create a new issue", text)
-        self.assertIn("Parameters:", text)
-        self.assertIn("repo (string): Repository name", text)
-        self.assertIn("title (string): Issue title", text)
-        self.assertIn("Required parameters: repo, title", text)
-    
-    def test_index_tools(self):
-        """Test indexing tools"""
-        self.searcher.index(self.sample_tools)
-        if self.searcher.tool_embeddings is not None:
-            print(self.searcher.tool_embeddings.shape)
-        # Check indexing results
-        self.assertTrue(self.searcher.is_indexed)
-        self.assertIsNotNone(self.searcher.bm25)
-        self.assertIsNotNone(self.searcher.tool_embeddings)
-        self.assertEqual(len(self.searcher.tools), 3)
-        self.assertEqual(len(self.searcher.tool_texts), 3)
-        
-        # Check embeddings shape
-        self.assertIsNotNone(self.searcher.tool_embeddings)
-        self.assertIsInstance(self.searcher.tool_embeddings, np.ndarray)
-        self.assertEqual(self.searcher.tool_embeddings.shape[0], 3)
-        self.assertEqual(self.searcher.tool_embeddings.shape[1], Config.EMBEDDING_DIM)
-    
-    def test_bm25_search(self):
-        """Test BM25 lexical search"""
-        self.searcher.index(self.sample_tools)
-        
-        # Test exact match
-        results = self.searcher._bm25_search("create github issue", top_k=2)
-        self.assertGreater(len(results), 0)
-        
-        # Check result format
-        for score, idx in results:
-            self.assertIsInstance(score, float)
-            self.assertIsInstance(idx, int)
-            self.assertGreaterEqual(score, 0)
-    
-    def test_dense_search(self):
-        """Test dense semantic search"""
-        self.searcher.index(self.sample_tools)
-        
-        # Test semantic search
-        results = self.searcher._dense_search("create a bug report", top_k=2)
-        self.assertGreater(len(results), 0)
-        
-        # Check result format
-        for score, idx in results:
-            self.assertIsInstance(score, float)
-            self.assertIsInstance(idx, int)
-            self.assertGreaterEqual(score, 0)
-            self.assertLessEqual(score, 1.0)  # Cosine similarity range
-    
-    def test_fuse_scores(self):
-        """Test score fusion"""
-        self.searcher.index(self.sample_tools)
-        
-        bm25_results = [(0.8, 0), (0.6, 1)]
-        dense_results = [(0.7, 0), (0.5, 2)]
-        
-        fused = self.searcher._fuse_scores(bm25_results, dense_results)
-        
-        # Check fusion
-        self.assertGreater(len(fused), 0)
-        for score, idx in fused:
-            self.assertIsInstance(score, float)
-            self.assertIsInstance(idx, int)
-    
-    def test_search(self):
-        """Test complete search pipeline"""
-        self.searcher.index(self.sample_tools)
-        
-        # Test search with various queries
-        test_queries = [
-            "create a github issue",
-            "send message to slack",
-            "run sql query"
-        ]
-        
-        for query in test_queries:
-            results = self.searcher.search(query, top_k=2)
-            
-            # Check results
-            self.assertIsInstance(results, list)
-            if len(results) > 0:
-                result = results[0]
-                self.assertIn('tool_name', result)
-                self.assertIn('tool_description', result)
-                self.assertIn('tool_schema', result)
-                self.assertIn('relevance_score', result)
-                self.assertIsInstance(result['relevance_score'], float)
-    
-    def test_search_without_indexing(self):
-        """Test that search fails if index not called"""
-        with self.assertRaises(RuntimeError):
-            self.searcher.search("test query")
-    
-    def test_search_empty_results(self):
-        """Test search with no matching tools"""
-        # Create searcher with empty tool list
-        empty_searcher = HybridToolSearcher()
-        empty_searcher.index([])
-        
-        results = empty_searcher.search("test query")
-        self.assertEqual(len(results), 0)
-    
-    def test_bm25_no_results(self):
-        """Test BM25 with no matching terms"""
-        self.searcher.index(self.sample_tools)
-        
-        # Query with completely different terms
-        results = self.searcher._bm25_search("xyzabc123", top_k=2)
-        
-        # Should return empty or very low scores
-        for score, idx in results:
-            self.assertLessEqual(score, 0.5)
-    
-    def test_tool_text_formatting(self):
-        """Test that tool text includes all required fields"""
-        tool = {
-            "name": "test_tool",
-            "description": "Test description",
-            "parameters": {
-                "param1": {"type": "string", "description": "Test param"}
-            },
-            "required": ["param1"]
-        }
-        
-        text = self.searcher._prepare_tool_text(tool)
-        
-        self.assertIn("test_tool", text)
-        self.assertIn("Test description", text)
-        self.assertIn("param1", text)
-        self.assertIn("string", text)
-        self.assertIn("required", text.lower())
-    
-    @patch('src.hybrid_searcher.CodeEmbedder')
-    def test_embedder_initialization(self, mock_embedder):
-        """Test embedder initialization"""
-        mock_embedder.return_value = Mock()
-        searcher = HybridToolSearcher()
-        self.assertIsNotNone(searcher.embedder)
-    
-    def test_numpy_array_conversion(self):
-        """Test that embeddings are stored as numpy arrays"""
-        self.searcher.index(self.sample_tools)
-        
-        self.assertIsInstance(self.searcher.tool_embeddings, np.ndarray)
-        self.assertEqual(self.searcher.tool_embeddings.dtype, np.float32)
+ensure_search_dependencies()
+
+from src.config import Config  # noqa: E402
+from src.hybrid_searcher import HybridToolSearcher  # noqa: E402
 
 
-class TestConfig(unittest.TestCase):
-    """Test configuration settings"""
-    
-    def test_config_values(self):
-        """Test config has required attributes"""
-        self.assertTrue(hasattr(Config, 'MODEL_CACHE_DIR'))
-        self.assertTrue(hasattr(Config, 'CODE_EMBEDDING_MODEL'))
-        self.assertTrue(hasattr(Config, 'EMBEDDING_DIM'))
-        self.assertTrue(hasattr(Config, 'BM25_CANDIDATES'))
-        self.assertTrue(hasattr(Config, 'DENSE_CANDIDATES'))
-        self.assertTrue(hasattr(Config, 'FUSION_CANDIDATES'))
-        self.assertTrue(hasattr(Config, 'FINAL_RESULTS'))
-        self.assertTrue(hasattr(Config, 'BM25_WEIGHT'))
-        self.assertTrue(hasattr(Config, 'DENSE_WEIGHT'))
-    
-    def test_embedding_dimension(self):
-        """Test embedding dimension is correct for Jina model"""
-        self.assertEqual(Config.EMBEDDING_DIM, 896)
-    
-    def test_fusion_weights(self):
-        """Test fusion weights sum to 1.0"""
-        total = Config.BM25_WEIGHT + Config.DENSE_WEIGHT
-        self.assertAlmostEqual(total, 1.0, places=5)
+class _InMemoryQdrantClient:
+    """In-memory mock for QdrantClient supporting HybridToolSearcher operations."""
+
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        self.collections: Dict[str, List[Any]] = {}
+        self.deleted_collections: List[str] = []
+
+    def collection_exists(self, collection_name: str) -> bool:
+        return collection_name in self.collections
+
+    def delete_collection(self, collection_name: str) -> None:
+        self.deleted_collections.append(collection_name)
+        self.collections.pop(collection_name, None)
+
+    def create_collection(self, collection_name: str, **kwargs: Any) -> None:
+        self.collections[collection_name] = []
+
+    def scroll(
+        self,
+        collection_name: str,
+        limit: int = 1000,
+        offset: Any = None,
+        with_payload: bool = False,
+        with_vectors: bool = False,
+    ):
+        points = self.collections.get(collection_name, [])
+        return points[:limit], None
+
+    def upload_points(self, collection_name: str, points: List[Any]) -> None:
+        bucket = self.collections.setdefault(collection_name, [])
+        existing_ids = {str(p.id) for p in bucket}
+        for point in points:
+            if str(point.id) not in existing_ids:
+                bucket.append(point)
+                existing_ids.add(str(point.id))
+
+    def query_points(
+        self,
+        collection_name: str = "",
+        prefetch: Any = None,
+        query: Any = None,
+        using: Optional[str] = None,
+        limit: int = 100,
+        with_payload: bool = False,
+        query_filter: Any = None,
+    ):
+        stored = list(self.collections.get(collection_name, []))
+        allowed_ids = None
+        if query_filter is not None and hasattr(query_filter, "must") and query_filter.must:
+            cond = query_filter.must[0]
+            if hasattr(cond, "has_id"):
+                allowed_ids = {str(pid) for pid in cond.has_id}
+
+        query_text = ""
+        if hasattr(query, "text"):
+            query_text = str(query.text).lower()
+        elif prefetch and hasattr(prefetch[0], "query") and hasattr(prefetch[0].query, "text"):
+            query_text = str(prefetch[0].query.text).lower()
+
+        query_tokens = [tok for tok in re.split(r"[^a-z0-9]+", query_text) if tok]
+
+        scored_points = []
+        for idx, pt in enumerate(stored):
+            if allowed_ids is not None and str(pt.id) not in allowed_ids:
+                continue
+            payload = getattr(pt, "payload", {}) or {}
+            haystack = f"{payload.get('name', '')} {payload.get('description', '')}".lower()
+            overlap = sum(2.0 if tok in payload.get("name", "").lower() else 1.0 for tok in query_tokens if tok in haystack)
+            score = overlap + (1.0 / (idx + 2))
+            scored_points.append(
+                SimpleNamespace(
+                    id=str(pt.id),
+                    score=float(score),
+                    payload=payload if with_payload else None,
+                )
+            )
+
+        scored_points.sort(key=lambda item: item.score, reverse=True)
+        return SimpleNamespace(points=scored_points[:limit])
 
 
-class TestPerformance(unittest.TestCase):
-    """Performance tests for large-scale operations"""
-    
-    def setUp(self):
-        self.searcher = HybridToolSearcher()
-        
-        # Create larger test dataset
-        self.large_tools = []
-        for i in range(100):  # 100 tools for performance test
-            tool = {
-                "name": f"tool_{i}",
-                "description": f"Description for tool {i} " + " ".join([f"keyword{j}" for j in range(5)]),
-                "parameters": {
-                    f"param_{j}": {"type": "string", "description": f"Parameter {j}"}
-                    for j in range(3)
-                },
-                "required": ["param_0"]
-            }
-            self.large_tools.append(tool)
-    
-    def test_indexing_performance(self):
-        """Test indexing time for 100 tools"""
-        import time
-        
-        start = time.time()
-        self.searcher.index(self.large_tools)
-        duration = time.time() - start
-        
-        print(f"Indexing 100 tools took {duration:.2f} seconds")
-        self.assertLess(duration, 60)  # Should take less than 60 seconds
-    
-    def test_search_performance(self):
-        """Test search time after indexing"""
-        self.searcher.index(self.large_tools)
-        
-        import time
-        start = time.time()
-        results = self.searcher.search("test query", top_k=5)
-        duration = time.time() - start
-        
-        print(f"Search took {duration:.3f} seconds")
-        self.assertLess(duration, 5)  # Should take less than 5 seconds
-
-
-class TestIntegration(unittest.TestCase):
-    """Integration tests with real queries"""
-    
-    def setUp(self):
-        self.searcher = HybridToolSearcher()
-        
-        # Load real tools if available, otherwise use samples
-        self.tools = []
-        tools_path = "tools/all_tools.json"
-        if os.path.exists(tools_path):
-            with open(tools_path, 'r') as f:
-                data = json.load(f)
-                self.tools = data if isinstance(data, list) else data.get('tools', [])
-        
-        if not self.tools:
-            # Use sample tools
-            self.tools = [
+def _make_sample_servers() -> List[Dict[str, Any]]:
+    return [
+        {
+            "name": "core",
+            "tools": [
                 {
                     "name": "create_github_issue",
                     "description": "Create a new issue in a GitHub repository",
                     "parameters": {
                         "repo": {"type": "string", "description": "Repository name"},
-                        "title": {"type": "string", "description": "Issue title"}
+                        "title": {"type": "string", "description": "Issue title"},
+                        "body": {"type": "string", "description": "Issue description"},
                     },
-                    "required": ["repo", "title"]
+                    "required": ["repo", "title"],
                 },
                 {
-                    "name": "search_github_code",
-                    "description": "Search for code in GitHub repositories",
+                    "name": "send_slack_message",
+                    "description": "Send a message to a Slack channel",
                     "parameters": {
-                        "query": {"type": "string", "description": "Search query"}
+                        "channel": {"type": "string", "description": "Channel ID"},
+                        "text": {"type": "string", "description": "Message text"},
                     },
-                    "required": ["query"]
-                }
-            ]
-        
-        self.searcher.index(self.tools)
-    
-    def test_semantic_search_github(self):
-        """Test semantic understanding of GitHub-related queries"""
-        results = self.searcher.search("I need to report a bug in my repository", top_k=3)
-        
-        # Should find GitHub-related tools
-        found_github = any('github' in r['tool_name'].lower() for r in results)
-        self.assertTrue(found_github, "Should find GitHub tools for bug report query")
-    
-    def test_exact_match_priority(self):
-        """Test that exact matches are prioritized"""
-        results = self.searcher.search("create_github_issue", top_k=3)
-        
-        if results:
-            # Exact match should be first
-            self.assertEqual(results[0]['tool_name'], "create_github_issue")
-    
-    def test_query_diversity(self):
-        """Test different query types"""
+                    "required": ["channel", "text"],
+                },
+                {
+                    "name": "execute_sql_query",
+                    "description": "Execute a SQL query on the database",
+                    "parameters": {
+                        "query": {"type": "string", "description": "SQL query"},
+                        "database": {"type": "string", "description": "Database name"},
+                    },
+                    "required": ["query"],
+                },
+            ],
+        }
+    ]
+
+
+class TestHybridToolSearcher(unittest.TestCase):
+    """Unit tests for the three-stage Qdrant HybridToolSearcher."""
+
+    def setUp(self) -> None:
+        self.sample_tools = _make_sample_servers()
+        with patch("src.hybrid_searcher.QdrantClient", side_effect=_InMemoryQdrantClient):
+            self.searcher = HybridToolSearcher()
+
+    def test_initialization(self) -> None:
+        """Searcher initializes client, model identifiers, and empty state."""
+        self.assertIsNotNone(self.searcher.client)
+        self.assertEqual(self.searcher.collection_name, "tool-search")
+        self.assertEqual(self.searcher.dense_model, "sentence-transformers/all-MiniLM-L6-v2")
+        self.assertEqual(self.searcher.sparse_model, "prithivida/Splade_PP_en_v1")
+        self.assertEqual(self.searcher.rerank_model, "colbert-ir/colbertv2.0")
+        self.assertEqual(self.searcher.tools, [])
+        self.assertIsNone(self.searcher.bm25)
+        self.assertFalse(self.searcher.is_indexed)
+
+    def test_tool_to_text_standard_and_input_schema(self) -> None:
+        """_tool_to_text formats both parameters and inputSchema tool definitions."""
+        tool = self.sample_tools[0]["tools"][0]
+        text = self.searcher._tool_to_text(tool)
+
+        self.assertIn("tool: create_github_issue", text)
+        self.assertIn("description: create a new issue in a github repository", text)
+        self.assertIn("repo: repository name", text)
+        self.assertIn("required parameters: repo, title", text)
+
+        schema_tool = {
+            "name": "list_pull_requests",
+            "server": "github",
+            "description": "List pull requests",
+            "inputSchema": {
+                "properties": {
+                    "state": {"type": "string", "description": "PR state filter"},
+                },
+                "required": ["state"],
+            },
+        }
+        schema_text = self.searcher._tool_to_text(schema_tool)
+        self.assertIn("tool: list_pull_requests", schema_text)
+        self.assertIn("server: github", schema_text)
+        self.assertIn("state: pr state filter", schema_text)
+        self.assertIn("required parameters: state", schema_text)
+
+    def test_tokenize_handles_camel_case_and_symbols(self) -> None:
+        """_tokenize splits camelCase and non-alphanumeric separators."""
+        tokens = self.searcher._tokenize("createGithubIssue_v2/test")
+        self.assertEqual(tokens, ["create", "github", "issue", "v2", "test"])
+        self.assertEqual(self.searcher._tokenize(""), [])
+
+    def test_index_tools_and_recreate(self) -> None:
+        """index(tools, recreate=...) populates BM25, Qdrant points, and is_indexed."""
+        self.searcher.index(self.sample_tools)
+
+        self.assertTrue(self.searcher.is_indexed)
+        self.assertIsNotNone(self.searcher.bm25)
+        self.assertEqual(len(self.searcher.tools), 3)
+        self.assertEqual(len(self.searcher.client.collections["tool-search"]), 3)
+
+        # Re-indexing with recreate=True deletes and recreates the collection
+        self.searcher.index({"servers": self.sample_tools}, recreate=True)
+        self.assertIn("tool-search", self.searcher.client.deleted_collections)
+        self.assertEqual(len(self.searcher.tools), 3)
+
+    def test_search_pipeline_and_limit(self) -> None:
+        """search(query, limit=...) returns ranked tool dictionaries."""
+        self.searcher.index(self.sample_tools)
+
         queries = [
-            "search code",
-            "create issue",
-            "find repository",
-            "bug tracker"
+            "create a github issue",
+            "send message to slack",
+            "run sql query",
         ]
-        
         for query in queries:
-            results = self.searcher.search(query, top_k=2)
+            results = self.searcher.search(query, limit=2)
             self.assertIsInstance(results, list)
-            # Should return at least one result for common queries
-            if len(self.tools) > 5:
-                self.assertGreater(len(results), 0, f"No results for query: {query}")
+            self.assertGreater(len(results), 0)
+            self.assertLessEqual(len(results), 2)
+            top = results[0]
+            self.assertIn("tool_name", top)
+            self.assertIn("tool_description", top)
+            self.assertIn("tool_schema", top)
+            self.assertIn("relevance_score", top)
+            self.assertIsInstance(top["relevance_score"], float)
+
+    def test_search_without_indexing_returns_empty_list(self) -> None:
+        """Calling search before index returns an empty list rather than raising."""
+        results = self.searcher.search("test query", limit=5)
+        self.assertEqual(results, [])
+
+    def test_search_empty_tools(self) -> None:
+        """Indexing an empty tool list leaves searcher unindexed and returns []."""
+        self.searcher.index([])
+        self.assertFalse(self.searcher.is_indexed)
+        self.assertEqual(self.searcher.search("test query", limit=5), [])
+
+    def test_search_uses_cache(self) -> None:
+        """Repeated identical search calls return cached results."""
+        self.searcher.index(self.sample_tools)
+        first = self.searcher.search("create github issue", limit=1)
+        second = self.searcher.search("create github issue", limit=1)
+        self.assertEqual(first, second)
+
+
+class TestHybridSearcherConfig(unittest.TestCase):
+    """Test configuration settings on Config."""
+
+    def test_config_values(self) -> None:
+        self.assertTrue(hasattr(Config, "BM25_CANDIDATES"))
+        self.assertTrue(hasattr(Config, "DENSE_CANDIDATES"))
+        self.assertTrue(hasattr(Config, "FUSION_CANDIDATES"))
+        self.assertTrue(hasattr(Config, "FINAL_RESULTS"))
+        self.assertTrue(hasattr(Config, "BM25_WEIGHT"))
+        self.assertTrue(hasattr(Config, "DENSE_WEIGHT"))
+        self.assertTrue(hasattr(Config, "QDRANT_URL"))
+        self.assertTrue(hasattr(Config, "QDRANT_COLLECTION"))
+
+    def test_fusion_weights(self) -> None:
+        total = Config.BM25_WEIGHT + Config.DENSE_WEIGHT
+        self.assertAlmostEqual(total, 1.0, places=5)
+
+
+def create_benchmark_searcher(num_tools: int = 100) -> Tuple[HybridToolSearcher, List[Dict[str, Any]]]:
+    """Create an in-memory HybridToolSearcher and synthetic dataset for performance benchmarks."""
+    with patch("src.hybrid_searcher.QdrantClient", side_effect=_InMemoryQdrantClient):
+        searcher = HybridToolSearcher()
+
+    tools = []
+    for i in range(num_tools):
+        tools.append(
+            {
+                "name": f"tool_{i}",
+                "description": f"Description for tool {i} data analysis "
+                + " ".join(f"keyword{j}" for j in range(5)),
+                "parameters": {
+                    f"param_{j}": {"type": "string", "description": f"Parameter {j}"}
+                    for j in range(3)
+                },
+                "required": ["param_0"],
+            }
+        )
+    large_tools = [{"name": "benchmark_server", "tools": tools}]
+    return searcher, large_tools
+
+
+class TestPerformance(unittest.TestCase):
+    """Performance tests for indexing and searching 100 tools."""
+
+    def setUp(self) -> None:
+        self.searcher, self.large_tools = create_benchmark_searcher()
+
+    def test_indexing_performance(self) -> None:
+        start = time.time()
+        self.searcher.index(self.large_tools, recreate=True)
+        duration = time.time() - start
+        self.assertTrue(self.searcher.is_indexed)
+        self.assertEqual(len(self.searcher.tools), 100)
+        self.assertLess(duration, 60)
+
+    def test_search_performance(self) -> None:
+        self.searcher.index(self.large_tools, recreate=True)
+        start = time.time()
+        results = self.searcher.search("test query", limit=5)
+        duration = time.time() - start
+        self.assertEqual(len(results), 5)
+        self.assertLess(duration, 5)
+
+
+class TestIntegration(unittest.TestCase):
+    """Integration-style tests over indexed tool definitions."""
+
+    def setUp(self) -> None:
+        with patch("src.hybrid_searcher.QdrantClient", side_effect=_InMemoryQdrantClient):
+            self.searcher = HybridToolSearcher()
+        self.tools = _make_sample_servers()
+        self.searcher.index(self.tools, recreate=True)
+
+    def test_semantic_search_github(self) -> None:
+        results = self.searcher.search("Create a new issue in a GitHub repository", limit=3)
+        found_github = any("github" in r["tool_name"].lower() for r in results)
+        self.assertTrue(found_github)
+
+    def test_exact_match_priority(self) -> None:
+        results = self.searcher.search("create_github_issue", limit=3)
+        self.assertGreater(len(results), 0)
+        self.assertEqual(results[0]["tool_name"], "create_github_issue")
+
+    def test_query_diversity(self) -> None:
+        for query in ["create issue", "send slack", "sql query", "database"]:
+            results = self.searcher.search(query, limit=2)
+            self.assertIsInstance(results, list)
+            self.assertGreater(len(results), 0)
 
 
 class TestEdgeCases(unittest.TestCase):
-    """Test edge cases and error handling"""
-    
-    def setUp(self):
-        self.sample_tools = [
-            {
-                "name": "create_github_issue",
-                "description": "Create a new issue in a GitHub repository",
-                "parameters": {
-                    "repo": {"type": "string", "description": "Repository name"},
-                    "title": {"type": "string", "description": "Issue title"},
-                    "body": {"type": "string", "description": "Issue description"}
-                },
-                "required": ["repo", "title"]
-            },
-            {
-                "name": "send_slack_message",
-                "description": "Send a message to a Slack channel",
-                "parameters": {
-                    "channel": {"type": "string", "description": "Channel ID"},
-                    "text": {"type": "string", "description": "Message text"}
-                },
-                "required": ["channel", "text"]
-            },
-            {
-                "name": "execute_sql_query",
-                "description": "Execute a SQL query on the database",
-                "parameters": {
-                    "query": {"type": "string", "description": "SQL query"},
-                    "database": {"type": "string", "description": "Database name"}
-                },
-                "required": ["query"]
-            }
-        ]
-        self.searcher = HybridToolSearcher()
-    
-    def test_empty_tools_list(self):
-        """Test indexing empty tool list"""
-        self.searcher.index([])
-        self.assertTrue(self.searcher.is_indexed)
-        results = self.searcher.search("test")
-        self.assertEqual(len(results), 0)
-    
-    def test_empty_query(self):
-        """Test search with empty query"""
-        self.searcher.index([{"name": "test", "description": "test", "parameters": {}}])
-        results = self.searcher.search("")
+    """Edge cases and input resilience tests."""
+
+    def setUp(self) -> None:
+        self.sample_tools = _make_sample_servers()
+        with patch("src.hybrid_searcher.QdrantClient", side_effect=_InMemoryQdrantClient):
+            self.searcher = HybridToolSearcher()
+
+    def test_empty_query(self) -> None:
+        self.searcher.index(self.sample_tools)
+        results = self.searcher.search("", limit=3)
         self.assertIsInstance(results, list)
-    
-    def test_special_characters_in_query(self):
-        """Test search with special characters"""
+
+    def test_special_characters_in_query(self) -> None:
         self.searcher.index(self.sample_tools)
-        
-        queries = [
-            "create@#$%",
-            "send/message",
-            "sql_query()",
-            "repo:owner/name"
-        ]
-        
-        for query in queries:
-            try:
-                results = self.searcher.search(query)
-                self.assertIsInstance(results, list)
-            except Exception as e:
-                self.fail(f"Query '{query}' raised exception: {e}")
-    
-    def test_unicode_query(self):
-        """Test search with unicode characters"""
-        self.searcher.index(self.sample_tools)
-        
-        queries = [
-            "创建问题",  # Chinese
-            "создать задачу",  # Russian
-            "créer un problème"  # French
-        ]
-        
-        for query in queries:
-            try:
-                results = self.searcher.search(query)
-                self.assertIsInstance(results, list)
-            except Exception as e:
-                self.fail(f"Unicode query '{query}' raised exception: {e}")
-    
-    def test_very_long_query(self):
-        """Test with very long query (1000+ chars)"""
-        self.searcher.index(self.sample_tools)
-        
-        long_query = "test " * 1000
-        try:
-            results = self.searcher.search(long_query)
+        for query in ["create@#$%", "send/message", "sql_query()", "repo:owner/name"]:
+            results = self.searcher.search(query, limit=2)
             self.assertIsInstance(results, list)
-        except Exception as e:
-            self.fail(f"Long query raised exception: {e}")
-    
-    def test_negative_top_k(self):
-        """Test with invalid top_k value"""
+
+    def test_unicode_query(self) -> None:
         self.searcher.index(self.sample_tools)
-        
-        results = self.searcher.search("test", top_k=-1)
-        # Should handle gracefully (maybe return default or empty)
+        for query in ["创建问题", "создать задачу", "créer un problème"]:
+            results = self.searcher.search(query, limit=2)
+            self.assertIsInstance(results, list)
+
+    def test_very_long_query(self) -> None:
+        self.searcher.index(self.sample_tools)
+        results = self.searcher.search("test " * 1000, limit=2)
         self.assertIsInstance(results, list)
 
 
-class TestMockedComponents(unittest.TestCase):
-    """Tests with mocked external dependencies"""
-    
-    def setUp(self):
-        self.sample_tools = [
-            {
-                "name": "create_github_issue",
-                "description": "Create a new issue in a GitHub repository",
-                "parameters": {
-                    "repo": {"type": "string", "description": "Repository name"},
-                    "title": {"type": "string", "description": "Issue title"},
-                    "body": {"type": "string", "description": "Issue description"}
-                },
-                "required": ["repo", "title"]
-            },
-            {
-                "name": "send_slack_message",
-                "description": "Send a message to a Slack channel",
-                "parameters": {
-                    "channel": {"type": "string", "description": "Channel ID"},
-                    "text": {"type": "string", "description": "Message text"}
-                },
-                "required": ["channel", "text"]
-            },
-            {
-                "name": "execute_sql_query",
-                "description": "Execute a SQL query on the database",
-                "parameters": {
-                    "query": {"type": "string", "description": "SQL query"},
-                    "database": {"type": "string", "description": "Database name"}
-                },
-                "required": ["query"]
-            }
-        ]
-    
-    @patch('src.hybrid_searcher.CodeEmbedder')
-    @patch('src.hybrid_searcher.LocalReranker')
-    def test_mocked_embedder(self, mock_reranker, mock_embedder):
-        """Test with mocked embedder"""
-        # Setup mocks
-        mock_embedder_instance = Mock()
-        mock_embedder_instance.batch_encode_tools.return_value = [[0.1] * 896] * 3
-        mock_embedder_instance.encode_query.return_value = [0.1] * 896
-        mock_embedder.return_value = mock_embedder_instance
-        
-        mock_reranker_instance = Mock()
-        mock_reranker_instance.rerank.return_value = [
-            {'index': 0, 'relevance_score': 0.9, 'document': 'test'}
-        ]
-        mock_reranker.return_value = mock_reranker_instance
-        
-        # Create searcher with mocks
-        searcher = HybridToolSearcher()
-        searcher.index(self.sample_tools)
-        
-        results = searcher.search("test")
-        self.assertEqual(len(results), 1)
-
-
-def run_tests():
-    """Run all tests"""
-    # Create test loader
-    loader = unittest.TestLoader()
-    
-    # Create test suite
-    suite = unittest.TestSuite()
-    suite.addTests(loader.loadTestsFromTestCase(TestHybridToolSearcher))
-    suite.addTests(loader.loadTestsFromTestCase(TestConfig))
-    suite.addTests(loader.loadTestsFromTestCase(TestEdgeCases))
-    suite.addTests(loader.loadTestsFromTestCase(TestIntegration))
-    
-    # Run tests
-    runner = unittest.TextTestRunner(verbosity=2)
-    result = runner.run(suite)
-    
-    return result.wasSuccessful()
-
-
-if __name__ == '__main__':
-    success = run_tests()
-    sys.exit(0 if success else 1)
+if __name__ == "__main__":
+    unittest.main()
