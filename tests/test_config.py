@@ -33,6 +33,14 @@ class TestConfig(unittest.TestCase):
             self.assertEqual(Config.MAX_OPEN_CONNECTIONS, 64)
             self.assertEqual(Config.GLOBAL_RATE, 50.0)
 
+    def test_qdrant_collection_env_override(self):
+        with patch.dict(os.environ, {"QDRANT_COLLECTION": "custom_tools"}):
+            import src.config
+            importlib.reload(src.config)
+            from src.config import Config
+
+            self.assertEqual(Config.QDRANT_COLLECTION, "custom_tools")
+
     def test_circuit_breaker_defaults(self):
         import src.config
         importlib.reload(src.config)
