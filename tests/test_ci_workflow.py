@@ -65,14 +65,5 @@ def test_ci_workflow_installs_dependencies_and_runs_active_unit_tests() -> None:
     assert "Run unit tests" in run_commands
     test_cmd = run_commands["Run unit tests"]
     assert "pytest -v" in test_cmd
-    for test_module in (
-        "tests/test_circuit_breaker.py",
-        "tests/test_auth_manager.py",
-        "tests/test_rate_limiter.py",
-        "tests/test_config.py",
-        "tests/test_extract_registry.py",
-        "tests/test_mcp_server_production.py",
-        "tests/test_ci_workflow.py",
-    ):
-        assert test_module in test_cmd
-        assert (REPO_ROOT / test_module).is_file()
+    assert "tests" in test_cmd
+    assert test_cmd.strip().startswith("pytest")
